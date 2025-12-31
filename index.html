@@ -282,9 +282,10 @@
 
 
 <canvas id="renderCanvas"></canvas>
-<script src="https://cdn.babylonjs.com/materialsLibrary/babylon.waterMaterial.min.js"></script>
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+<script src="https://cdn.babylonjs.com/materialsLibrary/babylon.waterMaterial.min.js"></script>
+
 
 <script>
   const canvas = document.getElementById("renderCanvas");
@@ -397,7 +398,7 @@
               scene
             );
 
-            lampLight.intensity = inten;  // empieza más alto (luego lo controlas con UI)
+            lampLight.intensity = 6;  // empieza más alto (luego lo controlas con UI)
             lampLight.range = 15;       // MUY importante: alcance de luz (prueba 8 a 25)
             lampLight.diffuse  = new BABYLON.Color3(1, 1, 1);
             lampLight.specular = new BABYLON.Color3(1, 1, 1);
@@ -442,7 +443,7 @@
               lampLight.setEnabled(isOn);
               lampLight.diffuse = col;
               lampLight.specular = col;
-              lampLight.intensity = 6;
+              lampLight.intensity = inten;
 
           
               // sincroniza brillo del mesh (si lo usamos)
@@ -500,10 +501,12 @@
           
               window.pezRef = pez;
 
-              const wm = waterMesh?.material;
-                if (wm && wm instanceof BABYLON.WaterMaterial) {
-                  wm.addToRenderList(pez);
-                }
+              const waterMesh2 = scene.getMeshByName("water");
+              const wm = waterMesh2?.material;
+              if (wm && wm instanceof BABYLON.WaterMaterial) {
+                wm.addToRenderList(pez);
+              }
+
             }
 
             
