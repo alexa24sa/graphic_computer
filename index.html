@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pecera - Iluminación Phong</title>
+  <style>
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      canvas { width: 100%; height: 100%; touch-action: none; display: block; }
+
+      /* Panel UI */
+      #uiPanel {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        background: rgba(0,0,0,0.55);
+        color: white;
+        padding: 12px 14px;
+        border-radius: 10px;
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+        width: 260px;
+        user-select: none;
+      }
+      #uiPanel h3 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+      }
+      #uiPanel .row { margin: 8px 0; }
+      #uiPanel label { display: block; margin-bottom: 4px; opacity: 0.9; }
+      #uiPanel input[type="range"] { width: 100%; }
+      #uiPanel .hint {
+        margin-top: 10px;
+        font-size: 12px;
+        opacity: 0.85;
+        line-height: 1.25;
+      }
+      #uiPanel .val { float: right; opacity: 0.9; }
+
+      /* Teclas tipo "keycap" */
+    .keysHelp {
+      margin-top: 10px;
+      font-size: 12px;
+      opacity: 0.95;
+      line-height: 1.35;
+    }
+    
+    .keysGrid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    
+    .krow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .keycap {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.10);
+      box-shadow: 0 2px 0 rgba(0,0,0,0.25);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    
+    .keycap.small { min-width: 24px; padding: 0 6px; }
+    .keycap.wide  { min-width: 52px; }
+    
+    .action {
+      color: rgba(255,255,255,0.92);
+    }
+    
+    .noteTiny {
+      margin-top: 6px;
+      opacity: 0.8;
+      font-size: 11px;
+    }
+
+    /* Upgrade: layout tipo videojuego */
+    .keysGrid2 {
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 10px;
+      margin-top: 8px;
+      align-items: center;
+    }
+
+    .keyPad {
+      display: grid;
+      grid-template-columns: repeat(3, 28px);
+      grid-template-rows: repeat(2, 28px);
+      gap: 6px;
+      justify-content: start;
+    }
+
+    .keyPad .empty {
+      width: 28px;
+      height: 28px;
+      opacity: 0;
+    }
+
+    .keycap.big {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border-radius: 7px;
+    }
+
+    .keyArrows {
+      display: grid;
+      grid-template-columns: 52px;
+      grid-template-rows: 28px 28px;
+      gap: 6px;
+    }
+
+    .keycap.arrow {
+      width: 52px;
+      height: 28px;
+      padding: 0;
+      border-radius: 7px;
+    }
+
+    /* Etiquetas con icono */
+    .actionLine {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.18);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .badge .ico {
+      font-size: 13px;
+    }
+
+    /* Botón toggle UI */
+    #toggleUI {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 11;
+      background: rgba(0,0,0,0.55);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #toggleUI:hover {
+      background: rgba(0,0,0,0.7);
+    }
+
+    #toggleUI .ico {
+      font-size: 14px;
+    }
+    </style>
+
+</head>
+<body>
+
+    <div id="uiPanel">
+      <h3>Controles de luz (Sol)</h3>
+
+      <div class="row">
+        <label>Intensidad <span class="val" id="valIntensity">1.2</span></label>
+        <input id="intensity" type="range" min="0" max="3" step="0.05" value="1.2">
+      </div>
+
+      <div class="row">
+        <label>Ángulo <span class="val" id="valAngle">0.00</span></label>
+        <input id="angle" type="range" min="-3.14" max="3.14" step="0.01" value="0">
+      </div>
+
+      <div class="row">
+        <label>Inclinación (radius) <span class="val" id="valRadius">2.50</span></label>
+        <input id="radius" type="range" min="0.5" max="6" step="0.05" value="2.5">
+      </div>
+
+      <div class="row">
+        <label>Distancia del marcador <span class="val" id="valMarker">1.20</span></label>
+        <input id="markerDist" type="range" min="0.5" max="3" step="0.05" value="1.2">
+      </div>
+
+
+      <hr style="border:0;border-top:1px solid rgba(255,255,255,0.15); margin:10px 0;">
+        
+      <h3 style="margin:0 0 6px 0;">Lámpara de la pecera</h3>
+        
+      <div class="row">
+        <label>
+          <input type="checkbox" id="lampOn" checked>
+          Encender lámpara
+        </label>
+      </div>
+      
+      <div class="row">
+        <label>Color <span class="val" id="valLampColor">#ffffff</span></label>
+        <input id="lampColor" type="color" value="#ffffff" style="width:100%; height:34px; border:none; background:transparent;">
+      </div>
+      
+      <div class="row">
+        <label>Intensidad <span class="val" id="valLampIntensity">1.50</span></label>
+        <input id="lampIntensity" type="range" min="0" max="20" step="0.1" value="6">
+      </div>
+
+
+
+
+      <div class="keysHelp">
+        <b>Controles rápidos</b>
+      
+        <div class="keysGrid2">
+          <!-- WASD (cruz) -->
+          <div class="keyPad">
+            <span class="empty"></span>
+            <span class="keycap big">W</span>
+            <span class="empty"></span>
+          
+            <span class="keycap big">A</span>
+            <span class="keycap big">S</span>
+            <span class="keycap big">D</span>
+          </div>
+      
+          <div>
+            <div class="actionLine">
+              <span class="badge"><span class="ico">☀️</span> Dirección</span>
+              <span class="action"><b>A/D</b> rotan el sol · <b>W/S</b> cambia inclinación</span>
+            </div>
+            <div class="noteTiny">W = más arriba (menos inclinación) · S = más abajo</div>
+          </div>
+      
+          <!-- Flechas -->
+          <div class="keyArrows">
+            <span class="keycap arrow">↑</span>
+            <span class="keycap arrow">↓</span>
+          </div>
+      
+          <div>
+            <div class="actionLine">
+              <span class="badge"><span class="ico">🔆</span> Intensidad</span>
+              <span class="action"><b>↑</b> aumenta · <b>↓</b> reduce</span>
+            </div>
+            <div class="noteTiny">También puedes usar los sliders para ajuste fino.</div>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+    <div id="toggleUI">
+      <span class="ico">📌</span>
+      <span id="toggleText">Ocultar controles</span>
+    </div>
+
+
+<canvas id="renderCanvas"></canvas>
+<script src="https://cdn.babylonjs.com/materialsLibrary/babylon.waterMaterial.min.js"></script>
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+
+<script>
+  const canvas = document.getElementById("renderCanvas");
+  const engine = new BABYLON.Engine(canvas, true);
+
+    const createScene = function () {
+      const scene = new BABYLON.Scene(engine);
+    
+      // ===== Cámara (sin duplicados) =====
+      const camera = new BABYLON.ArcRotateCamera(
+        "camera",
+        Math.PI / 2,
+        Math.PI / 3,
+        4, // cerca al iniciar
+        BABYLON.Vector3.Zero(),
+        scene
+      );
+      camera.attachControl(canvas, true);
+      // Evita que la cámara use teclado (flechas) y te robe los controles
+      if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
+        camera.inputs.attached.keyboard.detachControl();
+      }
+
+    
+      camera.lowerRadiusLimit = 1.35;          // más cerca
+      camera.upperRadiusLimit = 30;
+      camera.wheelDeltaPercentage = 0.005;    // zoom MUY suave (rueda)
+      camera.pinchDeltaPercentage = 0.005;    // touchpad
+    
+      // ===== Luces =====
+      const hemi = new BABYLON.HemisphericLight("hemi", new BABYLON.Vector3(0, 1, 0), scene);
+      hemi.intensity = 0.7;
+    
+      const light = new BABYLON.DirectionalLight("sun", new BABYLON.Vector3(-1, -2, -1), scene);
+      light.intensity = 1.2;
+
+      //let lampLight = null;
+    
+      // ===== Environment (reflejos) =====
+      scene.environmentTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+        "https://playground.babylonjs.com/textures/environment.env",
+        scene
+      );
+      scene.environmentIntensity = 0.7;
+
+      // ===== Imagen =====
+      scene.imageProcessingConfiguration.exposure = 1.35;
+      scene.imageProcessingConfiguration.contrast = 1.1;
+    
+      // ===== Cargar PECERA (SOLO UNA VEZ) =====
+      let lampLight = null;
+      BABYLON.SceneLoader.Append("./", "pecera1.glb", scene, () => {
+
+          // --- Vidrio ---
+          const glass = scene.getMeshByName("Aqua glass.002");
+          if (glass) {
+            const glassMat = new BABYLON.StandardMaterial("glassMat", scene);
+            glassMat.diffuseColor = new BABYLON.Color3(0.85, 0.90, 1.0);
+            glassMat.alpha = 0.18;
+            glassMat.specularColor = new BABYLON.Color3(1, 1, 1);
+            glassMat.specularPower = 256;
+            glassMat.needDepthPrePass = true;
+            glass.material = glassMat;
+          }
+      
+
+          // --- Agua (PRO: WaterMaterial) ---
+          const waterMesh = scene.getMeshByName("water");
+          if (waterMesh) {
+            const waterMat = new BABYLON.WaterMaterial("waterMat", scene, new BABYLON.Vector2(512, 512));
+            waterMat.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/waterbump.png", scene);
+          
+            waterMat.waterColor = new BABYLON.Color3(0.05, 0.25, 0.28);
+            waterMat.colorBlendFactor = 0.18; // más reflejo (0.10–0.25)
+            waterMat.windForce = 8;
+            waterMat.waveHeight = 0.10;
+            waterMat.bumpHeight = 0.20;
+            waterMat.windDirection = new BABYLON.Vector2(1, 1);
+          
+            // IMPORTANTÍSIMO: añade a renderList lo que SÍ existe (pecera ya cargada)
+            // Ojo: agrega todo lo que esté en escena excepto el water mesh
+            scene.meshes.forEach(m => {
+              if (m && m !== waterMesh) waterMat.addToRenderList(m);
+            });
+        
+            waterMesh.material = waterMat;
+          }
+
+
+
+          // ===== LÁMPARA de la pecera (PointLight + UI) =====
+          
+              
+          // Buscar mallas de lámpara del modelo
+          const lampMesh1 = scene.getMeshByName("Aqua light.002");
+          const lampMesh2 = scene.getMeshByName("Aqua light.003");
+          const lampMesh = lampMesh1 || lampMesh2;
+              
+          if (lampMesh) {
+            // Posición real en mundo del mesh de lámpara
+            const lampPos = lampMesh.getAbsolutePosition().clone();
+          
+            // Crea una luz puntual (tipo foco/linterna)
+            lampLight = new BABYLON.SpotLight(
+              "lampLight",
+              lampPos,
+              new BABYLON.Vector3(0, -1, 0), // luego lo corregimos cada frame con onBeforeRender
+              0.9,   // ángulo del cono (más chico = más concentrado). prueba 0.6 a 1.1
+              20,    // exponent (más alto = bordes más duros). prueba 10 a 40
+              scene
+            );
+
+            lampLight.intensity = inten;  // empieza más alto (luego lo controlas con UI)
+            lampLight.range = 15;       // MUY importante: alcance de luz (prueba 8 a 25)
+            lampLight.diffuse  = new BABYLON.Color3(1, 1, 1);
+            lampLight.specular = new BABYLON.Color3(1, 1, 1);
+            lampLight.angle = 0.75;     // más cerrado = más concentrado
+            lampLight.exponent = 30;    // más duro = más “foco”
+            lampLight.range = 25;       // alcance real
+            //lampLight.intensity = inten; // deja que el slider mande
+
+
+          
+            // (Opcional) que la malla "emita" luz visualmente (se vea encendida)
+            const emissiveMat = new BABYLON.StandardMaterial("lampEmissiveMat", scene);
+            emissiveMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // mismo color de la lámpara
+            emissiveMat.disableLighting = true; // para que brille sin depender de luces
+            // NO reemplaces el material original. Solo agrega emissive si existe material.
+            const lampMat = lampMesh.material;
+            if (lampMat) {
+              // StandardMaterial o PBRMaterial
+              if (lampMat.emissiveColor) {
+                lampMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+              }
+            }
+
+          
+            // Hook UI
+            const lampOn = document.getElementById("lampOn");
+            const lampColor = document.getElementById("lampColor");
+            const lampIntensity = document.getElementById("lampIntensity");
+            const valLampColor = document.getElementById("valLampColor");
+            const valLampIntensity = document.getElementById("valLampIntensity");
+          
+            function hexToColor3(hex) {
+              const c = BABYLON.Color3.FromHexString(hex);
+              return c;
+            }
+        
+            function applyLampUI() {
+              const isOn = lampOn.checked;
+              const col = hexToColor3(lampColor.value);
+              const inten = parseFloat(lampIntensity.value);
+          
+              lampLight.setEnabled(isOn);
+              lampLight.diffuse = col;
+              lampLight.specular = col;
+              lampLight.intensity = 6;
+
+          
+              // sincroniza brillo del mesh (si lo usamos)
+              emissiveMat.emissiveColor = isOn ? col : BABYLON.Color3.Black();
+          
+              valLampColor.textContent = lampColor.value;
+              valLampIntensity.textContent = inten.toFixed(2);
+            }
+        
+            lampOn.addEventListener("change", applyLampUI);
+            lampColor.addEventListener("input", applyLampUI);
+            lampIntensity.addEventListener("input", applyLampUI);
+        
+            applyLampUI();
+        
+          } else {
+            console.warn("No encontré 'Aqua light.002' ni 'Aqua light.003' en la pecera.");
+          }
+
+
+          // AHORA sí: cargar el pez (ya existe water)
+          // ===== Cargar PEZ =====
+          BABYLON.SceneLoader.ImportMesh("", "./", "fish.glb", scene,
+            function (meshes, ps, sk, animationGroups) {
+              const pez = meshes[0];
+            
+              // parar animación
+              if (animationGroups && animationGroups.length > 0) {
+                animationGroups.forEach(ag => { ag.stop(); ag.reset(); });
+              }
+          
+              // material Phong del pez
+              const pezMat = new BABYLON.StandardMaterial("pezMat", scene);
+              pezMat.diffuseColor = new BABYLON.Color3(1.0, 0.5, 0.2);
+              pezMat.specularColor = new BABYLON.Color3(1, 1, 1);
+              pezMat.specularPower = 128;
+              pez.material = pezMat;
+          
+              pez.scaling = new BABYLON.Vector3(0.2, 0.2, 0.2);
+              pez.rotation.y = Math.PI / 2;
+          
+              const water = scene.getMeshByName("water");
+              if (water) {
+                const bbox = water.getBoundingInfo().boundingBox;
+                const center = bbox.centerWorld;
+                const yMin = bbox.minimumWorld.y;
+                const yMax = bbox.maximumWorld.y;
+            
+                // Colócalo dentro del agua
+                pez.position = new BABYLON.Vector3(center.x, yMin + (yMax - yMin) * 0.45, center.z);
+                pez.position.z += 0.05;
+              } else {
+                pez.position = new BABYLON.Vector3(0, 0.5, 0);
+              }
+          
+              window.pezRef = pez;
+
+              const wm = waterMesh?.material;
+                if (wm && wm instanceof BABYLON.WaterMaterial) {
+                  wm.addToRenderList(pez);
+                }
+            }
+
+            
+
+        );
+      }
+      
+    
+    ); 
+  
+    // Mantener la lámpara pegada al mesh de la pecera (si existe)
+    // Mantener la lámpara pegada al mesh + apuntar al centro del agua
+    scene.onBeforeRenderObservable.add(() => {
+      if (!lampLight) return;
+
+      const lm = scene.getMeshByName("Aqua light.002") || scene.getMeshByName("Aqua light.003");
+      if (!lm) return;
+
+      // 1) Pegarlo al mesh real
+      lampLight.position.copyFrom(lm.getAbsolutePosition());
+
+      // 2) Apuntarlo al centro del agua (o al origen si no hay agua)
+      const water = scene.getMeshByName("water");
+      const center = water
+        ? water.getBoundingInfo().boundingBox.centerWorld
+        : BABYLON.Vector3.Zero();
+
+      lampLight.direction = center.subtract(lampLight.position).normalize();
+    });
+
+
+    
+        // ===== Sol controlable (se nota) =====
+        let sunAngle = 0;
+        let sunRadius = 2.5;
+        let markerDistance = 1.2;
+
+        // Marcador del sol (para corroborar iluminación)
+        const sunMarker = BABYLON.MeshBuilder.CreateSphere("sunMarker", { diameter: 0.12 }, scene);
+        const sunMat = new BABYLON.StandardMaterial("sunMat", scene);
+        sunMat.emissiveColor = new BABYLON.Color3(1, 1, 0);
+        sunMarker.material = sunMat;
+
+        // UI elementos
+        const uiIntensity = document.getElementById("intensity");
+        const uiAngle = document.getElementById("angle");
+        const uiRadius = document.getElementById("radius");
+        const uiMarkerDist = document.getElementById("markerDist");
+
+        const valIntensity = document.getElementById("valIntensity");
+        const valAngle = document.getElementById("valAngle");
+        const valRadius = document.getElementById("valRadius");
+        const valMarker = document.getElementById("valMarker");
+
+        function updateSunDirection() {
+          light.direction = new BABYLON.Vector3(
+            Math.cos(sunAngle),
+            -sunRadius,
+            Math.sin(sunAngle)
+          ).normalize();
+        
+          // Centro = agua si existe, si no origen
+          const water = scene.getMeshByName("water");
+          const center = water ? water.getBoundingInfo().boundingBox.centerWorld : BABYLON.Vector3.Zero();
+        
+          // marcador más cerca
+          sunMarker.position = center.subtract(light.direction.scale(markerDistance));
+        
+          // Actualizar UI texto
+          valIntensity.textContent = light.intensity.toFixed(2);
+          valAngle.textContent = sunAngle.toFixed(2);
+          valRadius.textContent = sunRadius.toFixed(2);
+          valMarker.textContent = markerDistance.toFixed(2);
+        }
+
+        // Inicializar valores UI
+        uiIntensity.value = light.intensity;
+        uiAngle.value = sunAngle;
+        uiRadius.value = sunRadius;
+        uiMarkerDist.value = markerDistance;
+
+        // Eventos UI (sliders)
+        uiIntensity.addEventListener("input", () => {
+          light.intensity = parseFloat(uiIntensity.value);
+          updateSunDirection();
+        });
+        uiAngle.addEventListener("input", () => {
+          sunAngle = parseFloat(uiAngle.value);
+          updateSunDirection();
+        });
+        uiRadius.addEventListener("input", () => {
+          sunRadius = parseFloat(uiRadius.value);
+          updateSunDirection();
+        });
+        uiMarkerDist.addEventListener("input", () => {
+          markerDistance = parseFloat(uiMarkerDist.value);
+          updateSunDirection();
+        });
+
+        updateSunDirection();
+
+        // Teclado (sigue funcionando aunque muevas la cámara)
+        window.addEventListener("keydown", (e) => {
+          if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key)) e.preventDefault();
+        
+          const stepAngle = 0.12;
+          const stepRadius = 0.15;
+        
+          if (e.key === "a" || e.key === "A") sunAngle -= stepAngle;
+          if (e.key === "d" || e.key === "D") sunAngle += stepAngle;
+        
+          if (e.key === "w" || e.key === "W") sunRadius = Math.max(0.5, sunRadius - stepRadius);
+          if (e.key === "s" || e.key === "S") sunRadius = Math.min(6.0, sunRadius + stepRadius);
+        
+          if (e.key === "ArrowUp")   light.intensity = Math.min(3, light.intensity + 0.1);
+          if (e.key === "ArrowDown") light.intensity = Math.max(0, light.intensity - 0.1);
+        
+          // Sincronizar sliders con teclado
+          uiIntensity.value = light.intensity;
+          uiAngle.value = sunAngle;
+          uiRadius.value = sunRadius;
+        
+          updateSunDirection();
+        });
+
+    
+    // ===== Toggle panel de controles =====
+    const uiPanel = document.getElementById("uiPanel");
+    const toggleBtn = document.getElementById("toggleUI");
+    const toggleText = document.getElementById("toggleText");
+
+    let uiVisible = true;
+
+    toggleBtn.addEventListener("click", () => {
+      uiVisible = !uiVisible;
+      uiPanel.style.display = uiVisible ? "block" : "none";
+      toggleText.textContent = uiVisible ? "Ocultar controles" : "Mostrar controles";
+    });
+
+
+      return scene;
+    };
+
+
+  const scene = createScene();
+
+  engine.runRenderLoop(() => {
+    scene.render();
+  });
+
+  window.addEventListener("resize", () => {
+    engine.resize();
+  });
+</script>
+
+</body>
+</html>
