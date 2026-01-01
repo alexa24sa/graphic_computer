@@ -285,6 +285,8 @@
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 <script src="https://cdn.babylonjs.com/materialsLibrary/babylon.waterMaterial.min.js"></script>
+<script src="https://cdn.babylonjs.com/lights/babylon.rectAreaLight.min.js"></script>
+
 
 
 <script>
@@ -332,11 +334,16 @@
       scene.environmentIntensity = 0.7;
 
       // ===== Imagen =====
-      scene.imageProcessingConfiguration.exposure = 1.35;
-      scene.imageProcessingConfiguration.contrast = 1.1;
+      scene.imageProcessingConfiguration.exposure = 1.05; // antes 1.35
+      scene.imageProcessingConfiguration.contrast = 1.08;
+
     
       // ===== Cargar PECERA (SOLO UNA VEZ) =====
-      let lampLight = null;
+
+      //let lampLight = null;
+      let lampLights = []; 
+      let lampEmissiveMat = null;
+
       BABYLON.SceneLoader.Append("./", "pecera1.glb", scene, () => {
 
           // --- Vidrio ---
@@ -349,119 +356,259 @@
             glassMat.specularPower = 256;
             glassMat.needDepthPrePass = true;
             glass.material = glassMat;
-          }
+          }      
+
       
 
-          // --- Agua (PRO: WaterMaterial) ---
+          // --- Agua (PRO: PBR + Refraction + Normal animada) ---
+          // === AGUA: agarrar mesh una sola vez ===
           const waterMesh = scene.getMeshByName("water");
+
           if (waterMesh) {
-            const waterMat = new BABYLON.WaterMaterial("waterMat", scene, new BABYLON.Vector2(512, 512));
-            waterMat.bumpTexture = new BABYLON.Texture("https://assets.babylonjs.com/environments/waterbump.png", scene);
           
-            waterMat.waterColor = new BABYLON.Color3(0.05, 0.25, 0.28);
-            waterMat.colorBlendFactor = 0.18; // más reflejo (0.10–0.25)
-            waterMat.windForce = 8;
-            waterMat.waveHeight = 0.10;
-            waterMat.bumpHeight = 0.20;
-            waterMat.windDirection = new BABYLON.Vector2(1, 1);
-          
-            // IMPORTANTÍSIMO: añade a renderList lo que SÍ existe (pecera ya cargada)
-            // Ojo: agrega todo lo que esté en escena excepto el water mesh
-            scene.meshes.forEach(m => {
-              if (m && m !== waterMesh) waterMat.addToRenderList(m);
-            });
-        
-            waterMesh.material = waterMat;
-          }
+            // ===== BURBUJAS (ParticleSystem) - CONTENIDAS EN EL AGUA =====
+            const bbox = waterMesh.getBoundingInfo().boundingBox;
+            const min = bbox.minimumWorld.clone();
+            const max = bbox.maximumWorld.clone();
 
+            // margen hacia adentro para que no nazcan pegadas al vidrio
+            const marginX = (max.x - min.x) * 0.10;
+            const marginZ = (max.z - min.z) * 0.10;
+            const marginTop = (max.y - min.y) * 0.06;
 
+            // límites interiores “seguros”
+            const safeMin = new BABYLON.Vector3(min.x + marginX, min.y,             min.z + marginZ);
+            const safeMax = new BABYLON.Vector3(max.x - marginX, max.y - marginTop, max.z - marginZ);
 
-          // ===== LÁMPARA de la pecera (PointLight + UI) =====
-          
-              
-          // Buscar mallas de lámpara del modelo
-          const lampMesh1 = scene.getMeshByName("Aqua light.002");
-          const lampMesh2 = scene.getMeshByName("Aqua light.003");
-          const lampMesh = lampMesh1 || lampMesh2;
-              
-          if (lampMesh) {
-            // Posición real en mundo del mesh de lámpara
-            const lampPos = lampMesh.getAbsolutePosition().clone();
-          
-            // Crea una luz puntual (tipo foco/linterna)
-            lampLight = new BABYLON.SpotLight(
-              "lampLight",
-              lampPos,
-              new BABYLON.Vector3(0, -1, 0), // luego lo corregimos cada frame con onBeforeRender
-              0.9,   // ángulo del cono (más chico = más concentrado). prueba 0.6 a 1.1
-              20,    // exponent (más alto = bordes más duros). prueba 10 a 40
+            // 1) CREAR bubbles ANTES de usarlo
+            const bubbles = new BABYLON.ParticleSystem("bubbles", 900, scene);
+            bubbles.particleTexture = new BABYLON.Texture(
+              "https://playground.babylonjs.com/textures/flare.png",
               scene
             );
 
-            lampLight.intensity = 6;  // empieza más alto (luego lo controlas con UI)
-            lampLight.range = 15;       // MUY importante: alcance de luz (prueba 8 a 25)
-            lampLight.diffuse  = new BABYLON.Color3(1, 1, 1);
-            lampLight.specular = new BABYLON.Color3(1, 1, 1);
-            lampLight.angle = 0.75;     // más cerrado = más concentrado
-            lampLight.exponent = 30;    // más duro = más “foco”
-            lampLight.range = 25;       // alcance real
-            //lampLight.intensity = inten; // deja que el slider mande
+            // Emisor pegado al lateral de la lámpara
+            const lampSideMesh = scene.getMeshByName("Aqua light.002") || scene.getMeshByName("Aqua light.003");
+            const emitter = new BABYLON.TransformNode("bubblesEmitter", scene);
 
+            // fallback: lateral derecho
+            emitter.position = new BABYLON.Vector3(
+              safeMax.x - 0.06,
+              safeMin.y + (safeMax.y - safeMin.y) * 0.08,
+              (safeMin.z + safeMax.z) * 0.5
+            );
 
-          
-            // (Opcional) que la malla "emita" luz visualmente (se vea encendida)
-            const emissiveMat = new BABYLON.StandardMaterial("lampEmissiveMat", scene);
-            emissiveMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // mismo color de la lámpara
-            emissiveMat.disableLighting = true; // para que brille sin depender de luces
-            // NO reemplaces el material original. Solo agrega emissive si existe material.
-            const lampMat = lampMesh.material;
-            if (lampMat) {
-              // StandardMaterial o PBRMaterial
-              if (lampMat.emissiveColor) {
-                lampMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
-              }
+            // si existe lámpara, elige automáticamente el lado
+            if (lampSideMesh) {
+              const lp = lampSideMesh.getAbsolutePosition();
+              const distToMin = Math.abs(lp.x - safeMin.x);
+              const distToMax = Math.abs(lp.x - safeMax.x);
+              emitter.position.x = (distToMin < distToMax ? safeMin.x + 0.03 : safeMax.x - 0.03);
+              emitter.position.z = BABYLON.Scalar.Clamp(lp.z, safeMin.z + 0.06, safeMax.z - 0.06);
+              emitter.position.y = safeMin.y + (safeMax.y - safeMin.y) * 0.08;
             }
 
+            bubbles.emitter = emitter;
+
+            // Caja angosta = “chorrito” lateral
+            const spanZ = (safeMax.z - safeMin.z) * 0.12;
+            const spanX = (safeMax.x - safeMin.x) * 0.03;
+            bubbles.minEmitBox = new BABYLON.Vector3(-spanX, 0, -spanZ);
+            bubbles.maxEmitBox = new BABYLON.Vector3( spanX, 0,  spanZ);
+
+            // Apariencia
+            bubbles.color1 = new BABYLON.Color4(1, 1, 1, 0.14);
+            bubbles.color2 = new BABYLON.Color4(0.9, 0.95, 1, 0.06);
+            bubbles.colorDead = new BABYLON.Color4(1, 1, 1, 0.0);
+
+            bubbles.minSize = 0.006;
+            bubbles.maxSize = 0.028;
+
+            bubbles.minLifeTime = 1.0;
+            bubbles.maxLifeTime = 2.4;
+
+            bubbles.direction1 = new BABYLON.Vector3(-0.01, 0.25, -0.01);
+            bubbles.direction2 = new BABYLON.Vector3( 0.01, 0.45,  0.01);
+
+            // gravedad hacia abajo (OK)
+            bubbles.gravity = new BABYLON.Vector3(0, -0.08, 0);
+
+            bubbles.emitRate = 120;
+            bubbles.updateSpeed = 0.02;
+            bubbles.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+
+            bubbles.start();
+            window.bubblesSystem = bubbles;
+
+            // si se salen, mueren
+            scene.onBeforeRenderObservable.add(() => {
+              const arr = bubbles.particles;
+              if (!arr || arr.length === 0) return;
+            
+              for (let i = 0; i < arr.length; i++) {
+                const p = arr[i];
+                if (!p) continue;
+              
+                if (
+                  p.position.x < safeMin.x || p.position.x > safeMax.x ||
+                  p.position.y < safeMin.y || p.position.y > safeMax.y ||
+                  p.position.z < safeMin.z || p.position.z > safeMax.z
+                ) {
+                  p.lifeTime = 0.0;
+                }
+              }
+            });
+
+
           
-            // Hook UI
+            // ===== AGUA “PRO”: PBR + normal animada =====
+            const w = new BABYLON.PBRMaterial("waterPBR", scene);
+            w.metallic = 0.0;
+            w.roughness = 0.06;
+            w.alpha = 0.45;
+            w.albedoColor = new BABYLON.Color3(0.03, 0.18, 0.22);
+          
+            // ✅ Normal map que SÍ existe (usa playground texture)
+            w.bumpTexture = new BABYLON.Texture(
+              "https://playground.babylonjs.com/textures/waterbump.png",
+              scene
+            );
+            w.bumpTexture.level = 0.9;
+            w.bumpTexture.uScale = 3.0;
+            w.bumpTexture.vScale = 3.0;
+          
+            w.environmentIntensity = 1.0;
+            w.microSurface = 0.95;
+          
+            w.subSurface.isRefractionEnabled = true;
+            w.subSurface.indexOfRefraction = 1.333;
+            w.subSurface.refractionIntensity = 0.65;
+            w.subSurface.tintColor = new BABYLON.Color3(0.04, 0.22, 0.26);
+            w.subSurface.tintColorAtDistance = 1.2;
+          
+            w.transparencyMode = BABYLON.PBRMaterial.PBRMATERIAL_ALPHABLEND;
+            w.needDepthPrePass = true;
+            w.separateCullingPass = true;
+            w.backFaceCulling = false;
+          
+            waterMesh.material = w;
+          
+            // Animación de ondas
+            scene.onBeforeRenderObservable.add(() => {
+              if (!w.bumpTexture) return;
+              w.bumpTexture.uOffset += 0.00045;
+              w.bumpTexture.vOffset += 0.00030;
+            });
+          
+          } else {
+            console.warn("No encontré el mesh 'water' dentro del .glb");
+          }
+
+
+
+          // ===== LÁMPARA de la pecera (SpotLights tipo panel + UI) =====
+          const lampMesh1 = scene.getMeshByName("Aqua light.002");
+          const lampMesh2 = scene.getMeshByName("Aqua light.003");
+          const lampMesh = lampMesh1 || lampMesh2;
+
+          if (lampMesh) {
+            // Usamos el bbox del mesh para saber “el ancho” de la lámpara y distribuir luces
+            const bb = lampMesh.getBoundingInfo().boundingBox;
+            const minW = bb.minimumWorld.clone();
+            const maxW = bb.maximumWorld.clone();
+            const center = bb.centerWorld.clone();
+          
+            // “largo” principal en X (si tu lámpara es larga hacia otro eje, lo ajustamos)
+            const spanX = (maxW.x - minW.x);
+            const spanZ = (maxW.z - minW.z);
+          
+            // Elegimos el eje más largo para repartir luces
+            const alongX = spanX >= spanZ;
+          
+            // Cantidad de focos: 3 suele bastar para “cubrir” todo
+            const count = 3;
+          
+            // Crea N spotlights alineados en la lámpara
+            for (let i = 0; i < count; i++) {
+              const t = count === 1 ? 0.5 : i / (count - 1); // 0..1
+              const pos = center.clone();
+            
+              if (alongX) {
+                pos.x = minW.x + spanX * t;
+              } else {
+                pos.z = minW.z + spanZ * t;
+              }
+            
+              // un poquito debajo del cuerpo de la lámpara
+              pos.y = center.y - 0.03;
+            
+              const spot = new BABYLON.SpotLight(
+                `lampSpot_${i}`,
+                pos,
+                BABYLON.Vector3.Down(), // se corrige cada frame
+                1.25,   // ángulo más abierto para cubrir superficie (antes estaba muy cerrado)
+                8,      // exponent bajo = bordes suaves (antes 30 = “bloquecito”)
+                scene
+              );
+            
+              spot.diffuse  = new BABYLON.Color3(1, 1, 1);
+              spot.specular = new BABYLON.Color3(1, 1, 1);
+              spot.intensity = 2.2;  // base; luego lo controla el slider
+              spot.range = 30;
+            
+              lampLights.push(spot);
+            }
+          
+            // Emisión visual de la lámpara (solo “se ve encendida”)
+            lampEmissiveMat = new BABYLON.StandardMaterial("lampEmissiveMat", scene);
+            lampEmissiveMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            lampEmissiveMat.disableLighting = true;
+          
+            // Si el mesh tiene material, le ponemos emissive sin romperlo demasiado
+            const lmMat = lampMesh.material;
+            if (lmMat && lmMat.emissiveColor) {
+              lmMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
+            }
+          
+            // UI
             const lampOn = document.getElementById("lampOn");
             const lampColor = document.getElementById("lampColor");
             const lampIntensity = document.getElementById("lampIntensity");
             const valLampColor = document.getElementById("valLampColor");
             const valLampIntensity = document.getElementById("valLampIntensity");
           
-            function hexToColor3(hex) {
-              const c = BABYLON.Color3.FromHexString(hex);
-              return c;
-            }
-        
             function applyLampUI() {
               const isOn = lampOn.checked;
-              const col = hexToColor3(lampColor.value);
+              const col = BABYLON.Color3.FromHexString(lampColor.value);
               const inten = parseFloat(lampIntensity.value);
-          
-              lampLight.setEnabled(isOn);
-              lampLight.diffuse = col;
-              lampLight.specular = col;
-              lampLight.intensity = inten;
-
-          
-              // sincroniza brillo del mesh (si lo usamos)
-              emissiveMat.emissiveColor = isOn ? col : BABYLON.Color3.Black();
-          
+            
+              // Repartimos intensidad entre los focos para que no queme
+              const perLight = inten / Math.max(1, lampLights.length);
+            
+              lampLights.forEach(L => {
+                L.setEnabled(isOn);
+                L.diffuse = col;
+                L.specular = col;
+                L.intensity = perLight;
+              });
+            
+              if (lampEmissiveMat) {
+                lampEmissiveMat.emissiveColor = isOn ? col : BABYLON.Color3.Black();
+              }
+            
               valLampColor.textContent = lampColor.value;
               valLampIntensity.textContent = inten.toFixed(2);
             }
-        
+          
             lampOn.addEventListener("change", applyLampUI);
             lampColor.addEventListener("input", applyLampUI);
             lampIntensity.addEventListener("input", applyLampUI);
-        
             applyLampUI();
-        
+          
           } else {
-            console.warn("No encontré 'Aqua light.002' ni 'Aqua light.003' en la pecera.");
+            console.warn("No encontré 'Aqua light.002' ni 'Aqua light.003' para la lámpara.");
           }
+
 
 
           // AHORA sí: cargar el pez (ya existe water)
@@ -517,25 +664,41 @@
     
     ); 
   
-    // Mantener la lámpara pegada al mesh de la pecera (si existe)
-    // Mantener la lámpara pegada al mesh + apuntar al centro del agua
-    scene.onBeforeRenderObservable.add(() => {
-      if (!lampLight) return;
-
-      const lm = scene.getMeshByName("Aqua light.002") || scene.getMeshByName("Aqua light.003");
-      if (!lm) return;
-
-      // 1) Pegarlo al mesh real
-      lampLight.position.copyFrom(lm.getAbsolutePosition());
-
-      // 2) Apuntarlo al centro del agua (o al origen si no hay agua)
-      const water = scene.getMeshByName("water");
-      const center = water
-        ? water.getBoundingInfo().boundingBox.centerWorld
-        : BABYLON.Vector3.Zero();
-
-      lampLight.direction = center.subtract(lampLight.position).normalize();
-    });
+        // Mantener la lámpara pegada al mesh + apuntar al centro del agua
+        scene.onBeforeRenderObservable.add(() => {
+          if (!lampLights || lampLights.length === 0) return;
+        
+          const lm = scene.getMeshByName("Aqua light.002") || scene.getMeshByName("Aqua light.003");
+          if (!lm) return;
+        
+          // Recalcula bbox “actual” por si el mesh se mueve
+          const bb = lm.getBoundingInfo().boundingBox;
+          const minW = bb.minimumWorld.clone();
+          const maxW = bb.maximumWorld.clone();
+          const center = bb.centerWorld.clone();
+          const spanX = (maxW.x - minW.x);
+          const spanZ = (maxW.z - minW.z);
+          const alongX = spanX >= spanZ;
+        
+          // Dirección hacia el centro del agua (mejor que “Down” fijo)
+          const water = scene.getMeshByName("water");
+          const target = water ? water.getBoundingInfo().boundingBox.centerWorld : BABYLON.Vector3.Zero();
+        
+          const count = lampLights.length;
+        
+          for (let i = 0; i < count; i++) {
+            const t = count === 1 ? 0.5 : i / (count - 1);
+            const pos = center.clone();
+          
+            if (alongX) pos.x = minW.x + spanX * t;
+            else        pos.z = minW.z + spanZ * t;
+          
+            pos.y = center.y - 0.03;
+          
+            lampLights[i].position.copyFrom(pos);
+            lampLights[i].direction = target.subtract(pos).normalize();
+          }
+        });
 
 
     
