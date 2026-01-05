@@ -181,6 +181,45 @@
     #toggleUI .ico {
       font-size: 14px;
     }
+
+    /* Estilizar checkboxes redondeados */
+    #uiPanel input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.08);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    #uiPanel input[type="checkbox"]:hover {
+      border-color: rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    #uiPanel input[type="checkbox"]:checked {
+      background: linear-gradient(135deg, rgba(100, 200, 255, 0.8), rgba(100, 150, 255, 0.8));
+      border-color: rgba(150, 220, 255, 0.9);
+      box-shadow: 0 0 8px rgba(100, 200, 255, 0.5);
+    }
+
+    #uiPanel input[type="checkbox"]:checked::before {
+      content: "✓";
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      color: white;
+      font-weight: bold;
+      font-size: 12px;
+    }
     </style>
 
 </head>
@@ -229,6 +268,21 @@
       <div class="row">
         <label>Intensidad <span class="val" id="valLampIntensity">1.50</span></label>
         <input id="lampIntensity" type="range" min="0" max="20" step="0.1" value="6">
+      </div>
+
+      <hr style="border:0;border-top:1px solid rgba(255,255,255,0.15); margin:10px 0;">
+      <h3 style="margin:0 0 6px 0;">Elementos</h3>
+
+      <div class="row">
+        <label>
+          <input type="checkbox" id="algaeOn" checked>
+          Mostrar algas
+        </label>
+      </div>
+
+      <div class="row">
+        <label>Algas Fractales <span class="val" id="valAlgaeScale">1.00</span></label>
+        <input id="algaeScale" type="range" min="0.6" max="2.2" step="0.05" value="1.00">
       </div>
 
 
@@ -293,6 +347,276 @@
   const canvas = document.getElementById("renderCanvas");
   const engine = new BABYLON.Engine(canvas, true);
 
+  // ===================== ALGAS FRACTALES (L-SYSTEM) =====================
+
+    // Genera string L-system
+    function lsystem(axiom, rules, iterations) {
+      let s = axiom;
+      for (let i = 0; i < iterations; i++) {
+        let out = "";
+        for (const ch of s) out += (rules[ch] ?? ch);
+        s = out;
+      }
+      return s;
+    }
+
+    // Interpreta turtle 2.5D (crece en Y, gira en XZ) y regresa una o varias "polylines"
+    function turtleToPolylines(cmd, opts) {
+      const {
+        step = 0.05,
+        angle = 22 * Math.PI / 180,
+        maxSegments = 6000
+      } = opts || {};
+    
+      // Estado turtle
+      let pos = new BABYLON.Vector3(0, 0, 0);
+      let dir = new BABYLON.Vector3(0, 1, 0); // hacia arriba (Y)
+      let yaw = 0; // giro en XZ (alrededor de Y)
+      let pitch = 0; // opcional (no usamos mucho)
+    
+      const stack = [];
+      const lines = [];
+      let current = [pos.clone()];
+    
+      let segments = 0;
+    
+      const rotateYaw = (a) => {
+        yaw += a;
+        // dirección base hacia arriba + componente lateral leve (más orgánico)
+        const lateral = new BABYLON.Vector3(Math.cos(yaw), 0, Math.sin(yaw)).scale(0.35);
+        dir = new BABYLON.Vector3(0, 1, 0).add(lateral).normalize();
+      };
+    
+      for (let i = 0; i < cmd.length; i++) {
+        const c = cmd[i];
+      
+        if (segments > maxSegments) break;
+      
+        if (c === "F") {
+          pos = pos.add(dir.scale(step));
+          current.push(pos.clone());
+          segments++;
+        } else if (c === "+") {
+          rotateYaw(+angle);
+        } else if (c === "-") {
+          rotateYaw(-angle);
+        } else if (c === "[") {
+          stack.push({ pos: pos.clone(), dir: dir.clone(), yaw, pitch, current });
+          // arrancar rama nueva desde el punto actual
+          const branch = [pos.clone()];
+          current = branch;
+          lines.push(current);
+        } else if (c === "]") {
+          // cerrar rama actual
+          const st = stack.pop();
+          if (!st) continue;
+        
+          // guardamos la rama actual si no se guardó
+          if (current.length > 1 && !lines.includes(current)) lines.push(current);
+        
+          pos = st.pos;
+          dir = st.dir;
+          yaw = st.yaw;
+          pitch = st.pitch;
+          current = st.current;
+          current.push(pos.clone());
+        }
+      }
+    
+      // Línea principal
+      if (current.length > 1) lines.unshift(current);
+    
+      // Filtrar líneas muy cortas
+      return lines.filter(l => l.length >= 4);
+    }
+
+    // Crea un mesh de alga (tubos) a partir de polylines
+    function buildAlgaeMesh(scene, polylines, material, radiusBase = 0.015) {
+      const parts = [];
+    
+      for (let li = 0; li < polylines.length; li++) {
+        const path = polylines[li];
+      
+        // radio que se adelgaza con la altura del path
+        const radii = path.map((p, idx) => {
+          const t = idx / Math.max(1, path.length - 1);
+          const r = radiusBase * (1.0 - 0.65 * t);
+          return Math.max(0.003, r);
+        });
+      
+        const tube = BABYLON.MeshBuilder.CreateTube(
+          `algaeTube_${li}`,
+          { path, radiusFunction: (i) => radii[Math.min(i, radii.length - 1)], tessellation: 10, cap: BABYLON.Mesh.CAP_END },
+          scene
+        );
+        tube.material = material;
+        parts.push(tube);
+      }
+    
+      const merged = BABYLON.Mesh.MergeMeshes(parts, true, true, undefined, false, true);
+      return merged;
+    }
+
+    function fitNodeIntoWater(node, waterMesh, opts = {}) {
+      const {
+        heightRatio = 0.55,
+        widthRatio  = 0.28,
+        depthRatio  = 0.22,
+        floorPadding = 0.01,
+        side = "left" // left|right|center
+      } = opts;
+    
+      if (!node || !waterMesh) return;
+    
+      node.computeWorldMatrix(true);
+      waterMesh.computeWorldMatrix(true);
+    
+      const wb = waterMesh.getBoundingInfo().boundingBox;
+      const wMin = wb.minimumWorld.clone();
+      const wMax = wb.maximumWorld.clone();
+    
+      const waterSize = new BABYLON.Vector3(
+        wMax.x - wMin.x,
+        wMax.y - wMin.y,
+        wMax.z - wMin.z
+      );
+    
+      const nb = node.getHierarchyBoundingVectors(true);
+      const nMin = nb.min.clone();
+      const nMax = nb.max.clone();
+    
+      const nodeSize = new BABYLON.Vector3(
+        nMax.x - nMin.x,
+        nMax.y - nMin.y,
+        nMax.z - nMin.z
+      );
+    
+      const eps = 1e-6;
+      const sx = (waterSize.x * widthRatio)  / Math.max(nodeSize.x, eps);
+      const sy = (waterSize.y * heightRatio) / Math.max(nodeSize.y, eps);
+      const sz = (waterSize.z * depthRatio)  / Math.max(nodeSize.z, eps);
+    
+      const s = Math.min(sx, sy, sz);
+      node.scaling.scaleInPlace(s);
+    
+      node.computeWorldMatrix(true);
+    
+      const nb2 = node.getHierarchyBoundingVectors(true);
+      const nMin2 = nb2.min.clone();
+      const nMax2 = nb2.max.clone();
+    
+      const waterBottomY = wMin.y;
+      const targetY = waterBottomY + floorPadding - nMin2.y;
+      node.position.y += targetY;
+    
+      const centerX = (wMin.x + wMax.x) * 0.5;
+      const leftX   = wMin.x + waterSize.x * 0.18;
+      const rightX  = wMax.x - waterSize.x * 0.18;
+    
+      const nodeCenterX = (nMin2.x + nMax2.x) * 0.5;
+    
+      if (side === "left")   node.position.x += (leftX  - nodeCenterX);
+      if (side === "right")  node.position.x += (rightX - nodeCenterX);
+      if (side === "center") node.position.x += (centerX- nodeCenterX);
+    
+      const centerZ = (wMin.z + wMax.z) * 0.5;
+      const nodeCenterZ = (nMin2.z + nMax2.z) * 0.5;
+      node.position.z += (centerZ - nodeCenterZ) + waterSize.z * 0.08;
+    }
+
+
+    // Crea un "clúster" de algas y lo posiciona dentro del agua
+    
+
+
+
+    function spawnFractalAlgae(scene, safeMin, safeMax, howMany = 10) {
+    // root grupal para poder escalar TODO junto
+    const group = new BABYLON.TransformNode("algaeGroup", scene);
+
+    // Material alga (Phong/Standard)
+    const algaeMat = new BABYLON.StandardMaterial("algaeMat", scene);
+    algaeMat.diffuseColor = new BABYLON.Color3(0.08, 0.55, 0.22);
+    algaeMat.specularColor = new BABYLON.Color3(0.12, 0.12, 0.12);
+    algaeMat.specularPower = 32;
+    algaeMat.emissiveColor = new BABYLON.Color3(0.01, 0.05, 0.02);
+
+    // L-system “clásico” tipo planta
+    const axiom = "F";
+    const rules = { "F": "FF-[-F+F+F]+[+F-F-F]" };
+
+    const algaeRoots = [];
+
+    for (let i = 0; i < howMany; i++) {
+      const iter = 3 + Math.floor(Math.random() * 2); // 3..4
+      const ang = (18 + Math.random() * 16) * Math.PI / 180; // 18°..34°
+      const step = 0.04 + Math.random() * 0.03; // 0.04..0.07
+
+      const cmd = lsystem(axiom, rules, iter);
+
+      const polylines = turtleToPolylines(cmd, {
+        step,
+        angle: ang,
+        maxSegments: 4500
+      });
+
+      // Mesh alga
+      const algae = buildAlgaeMesh(scene, polylines, algaeMat, 0.014 + Math.random() * 0.008);
+
+      // Nodo padre para animación “sway”
+      const root = new BABYLON.TransformNode(`algaeRoot_${i}`, scene);
+      algae.parent = root;
+
+      // meter cada alga dentro del grupo
+      root.parent = group;
+
+      // Posición aleatoria dentro del agua (en el fondo)
+      const x = BABYLON.Scalar.Lerp(safeMin.x, safeMax.x, Math.random());
+      const z = BABYLON.Scalar.Lerp(safeMin.z, safeMax.z, Math.random());
+      const y = safeMin.y + 0.02;
+
+      root.position.set(x, y, z);
+
+      // Escala + rotación random (esto ya lo tenías; luego el "fit" las ajusta global)
+      const s = 0.75 + Math.random() * 1.2;
+      root.scaling.set(s, s, s);
+      root.rotation.y = Math.random() * Math.PI * 2;
+
+      root.rotation.x = (Math.random() - 0.5) * 0.25;
+      root.rotation.z = (Math.random() - 0.5) * 0.25;
+
+      root.metadata = {
+        swaySpeed: 0.6 + Math.random() * 0.8,
+        swayAmp: 0.12 + Math.random() * 0.18,
+        swayPhase: Math.random() * Math.PI * 2
+      };
+
+      algaeRoots.push(root);
+    }
+
+  // Animación: mecido suave
+  scene.onBeforeRenderObservable.add(() => {
+    const t = scene.getEngine().getDeltaTime() * 0.001;
+    const time = (scene._algaeTime = (scene._algaeTime || 0) + t);
+
+    for (const root of algaeRoots) {
+      const m = root.metadata;
+      const w = Math.sin(time * m.swaySpeed + m.swayPhase) * m.swayAmp;
+      root.rotation.z = w;
+    }
+  });
+
+
+
+  group.computeWorldMatrix(true);
+  // Forzar bounding de las mallas hijas (no del TransformNode)
+  group.getChildMeshes(false).forEach(m => m.refreshBoundingInfo(true));
+
+
+  // importante: regresamos el grupo completo
+  return group;
+}
+
     const createScene = function () {
       const scene = new BABYLON.Scene(engine);
     
@@ -343,9 +667,11 @@
       //let lampLight = null;
       let lampLights = []; 
       let lampEmissiveMat = null;
+      let algaeGroup = null;
+
 
       BABYLON.SceneLoader.Append("./", "pecera1.glb", scene, () => {
-
+        try {
           // --- Vidrio ---
           const glass = scene.getMeshByName("Aqua glass.002");
           if (glass) {
@@ -364,6 +690,9 @@
           // === AGUA: agarrar mesh una sola vez ===
           const waterMesh = scene.getMeshByName("water");
 
+          let waterSafeMin = null;
+          let waterSafeMax = null;
+
           if (waterMesh) {
           
             // ===== BURBUJAS (ParticleSystem) - CONTENIDAS EN EL AGUA =====
@@ -379,6 +708,9 @@
             // límites interiores “seguros”
             const safeMin = new BABYLON.Vector3(min.x + marginX, min.y,             min.z + marginZ);
             const safeMax = new BABYLON.Vector3(max.x - marginX, max.y - marginTop, max.z - marginZ);
+
+            waterSafeMin = safeMin;
+            waterSafeMax = safeMax;
 
             // 1) CREAR bubbles ANTES de usarlo
             const bubbles = new BABYLON.ParticleSystem("bubbles", 900, scene);
@@ -504,6 +836,25 @@
             console.warn("No encontré el mesh 'water' dentro del .glb");
           }
 
+          // ===== ALGAS FRACTALES (L-system) =====
+          // ===== ALGAS FRACTALES (L-system) =====
+          if (waterSafeMin && waterSafeMax && waterMesh) {
+            algaeGroup = spawnFractalAlgae(scene, waterSafeMin, waterSafeMax, 10);
+          
+            // 🔻 Fit MUY agresivo para que no sean gigantes
+            fitNodeIntoWater(algaeGroup, waterMesh, {
+              heightRatio: 0.35,
+              widthRatio:  0.18,
+              depthRatio:  0.15,
+              floorPadding: 0.01,
+              side: "left"
+            });
+          }
+
+
+
+
+
 
 
           // ===== LÁMPARA de la pecera (SpotLights tipo panel + UI) =====
@@ -613,6 +964,7 @@
 
           // AHORA sí: cargar el pez (ya existe water)
           // ===== Cargar PEZ =====
+          console.log("Llego hasta antes de cargar el pez");
           BABYLON.SceneLoader.ImportMesh("", "./", "fish.glb", scene,
             function (meshes, ps, sk, animationGroups) {
               const pez = meshes[0];
@@ -659,10 +1011,51 @@
             
 
         );
-      }
-      
-    
-    ); 
+
+          // ===== CONTROL DE ALGAS CON CHECKBOX =====
+          const algaeOn = document.getElementById("algaeOn");
+
+          function applyAlgaeUI() {
+            if (!algaeGroup) return;
+            const on = algaeOn.checked;
+
+            // Activa/desactiva el grupo (TransformNode)
+            algaeGroup.setEnabled(on);
+
+            // Asegura que las mallas hijas también se oculten (por si acaso)
+            algaeGroup.getChildMeshes(false).forEach(m => m.setEnabled(on));
+          }
+
+          algaeOn.addEventListener("change", applyAlgaeUI);
+          applyAlgaeUI(); // aplica al inicio
+
+          // ===== CONTROL DE TAMAÑO DE ALGAS (SLIDER) =====
+          const algaeScale = document.getElementById("algaeScale");
+          const valAlgaeScale = document.getElementById("valAlgaeScale");
+
+          // Guardamos la escala base (la que queda después del fitNodeIntoWater)
+          let algaeBaseScaling = null;
+
+          function applyAlgaeScaleUI() {
+            if (!algaeGroup) return;
+
+            if (!algaeBaseScaling) {
+              algaeBaseScaling = algaeGroup.scaling.clone(); // escala que dejó fitNodeIntoWater
+            }
+
+            const k = parseFloat(algaeScale.value); // 1.0 = igual, 1.2 = 20% más grandes
+            algaeGroup.scaling = algaeBaseScaling.scale(k);
+
+            valAlgaeScale.textContent = k.toFixed(2);
+          }
+
+          algaeScale.addEventListener("input", applyAlgaeScaleUI);
+          applyAlgaeScaleUI();
+        } catch (err) {
+          console.error("💥 Error dentro del callback Append:", err);
+          throw err; // para que Babylon también lo reporte
+        }
+      }); 
   
         // Mantener la lámpara pegada al mesh + apuntar al centro del agua
         scene.onBeforeRenderObservable.add(() => {
